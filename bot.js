@@ -67,7 +67,7 @@ async function callAI(history) {
           role: m.role === 'bot' ? 'model' : 'user',
           parts: [{ text: m.text }],
         })),
-        generationConfig: { temperature: 0.7, maxOutputTokens: 300 },
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
       }),
     }
   );
