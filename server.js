@@ -8,7 +8,7 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'doi_verify_token_nay';
 const APP_SECRET = process.env.APP_SECRET || '';
 
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
-
+app.use(express.static('public'));
 function verifySignature(req) {
   if (!APP_SECRET) return true;
   const sig = req.headers['x-hub-signature-256'] || '';
