@@ -3,10 +3,17 @@
 import { getMenuText, getShopInfo } from './knowledge.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const ORDER_TOOL_URL = process.env.ORDER_TOOL_URL || '';
 const SHOP_NAME = process.env.SHOP_NAME || 'Shop';
+const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://chatbot-kyodo.onrender.com').replace(/\/$/, '');
 const PAGE_INBOX_APP_ID = '263902037430900'; // ID cố định của Hộp thư Page
+
+// Ảnh menu phục vụ từ thư mục public/ của server
+const MENU_IMAGES = [`${PUBLIC_URL}/menu-1.jpg`, `${PUBLIC_URL}/menu-2.jpg`];
+
+// Nhận diện khách hỏi menu
+const MENU_INTENT = /(menu|thực đơn|thuc don|mẹt|món lẻ|xem món)/i;
 
 // Tìm token của Page gửi tin nhắn đến.
 // - Nếu có PAGE_TOKENS (dạng JSON {"id_page":"token",...}): bắt buộc khớp đúng page.
@@ -30,6 +37,12 @@ function getHistory(pageId, psid) {
   const key = `${pageId}:${psid}`;
   if (!conversations.has(key)) conversations.set(key, []);
   return conversations.get(key);
+}
+
+function pushHistory(pageId, psid, role, text) {
+  const history = getHistory(pageId, psid);
+  history.push({ role, text });
+  while (history.length > MAX_HISTORY) history.shift();
 }
 
 function buildSystemPrompt() {
@@ -103,6 +116,16 @@ const sendText = (token, psid, text) =>
     message: { text },
   });
 
+// Gửi ảnh cho khách (dùng khi khách hỏi menu)
+const sendImage = (token, psid, imageUrl) =>
+  graphAPI(token, '/me/messages', {
+    recipient: { id: psid },
+    messaging_type: 'RESPONSE',
+    message: {
+      attachment: { type: 'image', payload: { url: imageUrl, is_reusable: true } },
+    },
+  });
+
 const senderAction = (token, psid, action) =>
   graphAPI(token, '/me/messages', { recipient: { id: psid }, sender_action: action });
 
@@ -112,6 +135,18 @@ const handoffToHuman = (token, psid) =>
     recipient: { id: psid },
     target_app_id: PAGE_INBOX_APP_ID,
   });
+
+// Khách hỏi menu: gửi full menu chữ + ảnh menu, không qua AI (tránh tóm tắt thiếu)
+async function handleMenuRequest(token, pageId, psid) {
+  const intro = 'Dạ em gửi anh/chị menu của shop ạ 😊';
+  const menuText = `${intro}\n\n${getMenuText()}\n\nAnh/chị ưng món nào thì nhắn em nhé ạ!`;
+  await sendText(token, psid, menuText);
+  for (const img of MENU_IMAGES) {
+    await sendImage(token, psid, img);
+  }
+  pushHistory(pageId, psid, 'bot', menuText);
+  console.log(`Đã gửi menu + ${MENU_IMAGES.length} ảnh cho ${psid} (Page ${pageId}).`);
+}
 
 export async function handleMessage(event) {
   // Bỏ qua tin nhắn do chính Page/bot gửi (chống lặp vô hạn)
@@ -128,17 +163,21 @@ export async function handleMessage(event) {
     return;
   }
 
-  const history = getHistory(pageId, psid);
-  history.push({ role: 'user', text });
-  while (history.length > MAX_HISTORY) history.shift();
+  pushHistory(pageId, psid, 'user', text);
 
   // Hiện "đang nhập..." cho tự nhiên
   await senderAction(token, psid, 'mark_seen');
   await senderAction(token, psid, 'typing_on');
 
+  // Khách hỏi menu: trả lời trực tiếp, không qua AI
+  if (MENU_INTENT.test(text)) {
+    await handleMenuRequest(token, pageId, psid);
+    return;
+  }
+
   let reply = '';
   try {
-    reply = await callAI(history);
+    reply = await callAI(getHistory(pageId, psid));
   } catch (e) {
     console.error('Lỗi gọi AI:', e.message);
     reply = 'Dạ shop đang đông khách, anh/chị đợi em một chút nhé ạ.';
@@ -148,8 +187,7 @@ export async function handleMessage(event) {
   const needHandoff = reply.includes('[HANDOFF]');
   reply = reply.replace('[HANDOFF]', '').trim();
 
-  history.push({ role: 'bot', text: reply });
-  while (history.length > MAX_HISTORY) history.shift();
+  pushHistory(pageId, psid, 'bot', reply);
 
   await senderAction(token, psid, 'typing_off');
   await sendText(token, psid, reply);
