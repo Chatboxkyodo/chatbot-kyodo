@@ -1,0 +1,1 @@
+{"dependencies":{"express":"^4.19.2"},"description":"Chatbot AI tu van tu dong cho Fanpage Facebook (Messenger)","main":"server.js","name":"chatbot-fanpage","scripts":{"start":"node server.js","test":"node test-local.js"},"type":"module","version":"1.0.0"}
